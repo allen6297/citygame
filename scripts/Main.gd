@@ -48,6 +48,7 @@ var chunk_system: CityChunkSystem
 var active_render_chunks: Dictionary = {}
 var current_camera_chunk: Vector2i = Vector2i(2147483647, 2147483647)
 var current_render_radius: int = -1
+var wireframe_debug_active := false
 var preview_road: MeshInstance3D
 var curve_control_cursor: MeshInstance3D
 var hovered_world_position: Vector3 = Vector3.ZERO
@@ -94,6 +95,10 @@ func _process(delta: float) -> void:
 	camera_controller.handle_keyboard_camera_pan(self, delta)
 	road_editor.process(self)
 	render_controller.update_visible_chunks(self)
+	var should_show_wireframe: bool = Input.is_key_pressed(KEY_SPACE)
+	if should_show_wireframe != wireframe_debug_active:
+		wireframe_debug_active = should_show_wireframe
+		render_controller.set_wireframe_debug(self, wireframe_debug_active)
 	ui_controller.update_zoom_label(self)
 
 
