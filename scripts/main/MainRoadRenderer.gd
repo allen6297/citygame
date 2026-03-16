@@ -5,8 +5,9 @@ const DEBUG_INTERSECTION_JOINS := true
 const DEBUG_SEGMENT_STRIPS := true
 const JOIN_EPSILON := 0.0001
 const MIN_JOIN_TRIM := 0.1
-const FILLET_MAX_HANDLE_FACTOR := 0.35
-const FILLET_MIN_POINT_COUNT := 3
+const FILLET_MAX_HANDLE_FACTOR := 0.5
+const FILLET_MIN_HANDLE_FACTOR := 0.25
+const FILLET_MIN_POINT_COUNT := 5
 
 var _wireframe_overlay_material: ShaderMaterial
 
@@ -520,17 +521,20 @@ func _sample_corner_fillet(start_point: Vector3, start_direction: Vector3, end_p
 	if start_tangent.length_squared() <= JOIN_EPSILON or end_tangent.length_squared() <= JOIN_EPSILON:
 		return [start_point, end_point]
 	var turn_amount: float = absf(_signed_turn_2d(start_tangent, end_tangent))
-	var local_radius: float = min(start_point.distance_to(end_point) * 0.5, 6.0)
-	var handle_length: float = min(chord_length * FILLET_MAX_HANDLE_FACTOR, local_radius)
-	if turn_amount < deg_to_rad(8.0):
+	if turn_amount < deg_to_rad(2.0):
 		return [start_point, end_point]
+	var turn_blend: float = inverse_lerp(deg_to_rad(2.0), PI, turn_amount)
+	var handle_factor: float = lerpf(FILLET_MIN_HANDLE_FACTOR, FILLET_MAX_HANDLE_FACTOR, turn_blend)
+	var local_radius: float = min(chord_length * 0.65, 8.0)
+	var handle_length: float = min(chord_length * handle_factor, local_radius)
 	if turn_amount > deg_to_rad(150.0):
 		handle_length = min(handle_length, chord_length * 0.2)
 	if handle_length <= MIN_JOIN_TRIM * 0.25:
 		return [start_point, end_point]
 	var control_a: Vector3 = start_point + start_tangent * handle_length
 	var control_b: Vector3 = end_point - end_tangent * handle_length
-	var sample_count: int = maxi(FILLET_MIN_POINT_COUNT, int(ceil(chord_length / 1.5)) + 1)
+	var curvature_boost: float = 1.0 + turn_blend
+	var sample_count: int = maxi(FILLET_MIN_POINT_COUNT, int(ceil((chord_length * curvature_boost) / 0.9)) + 1)
 	var result: Array[Vector3] = []
 	for sample_index in range(sample_count):
 		var t: float = float(sample_index) / float(sample_count - 1)
