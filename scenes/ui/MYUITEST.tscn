@@ -1,0 +1,41 @@
+[gd_scene format=3 uid="uid://dw64dx08iy1dn"]
+
+[ext_resource type="Theme" uid="uid://daindmdsntu8u" path="res://util/uitheme/GlassTheme.tres" id="1_bxyah"]
+[ext_resource type="Script" uid="uid://ci8yyqxlbjr1s" path="res://scenes/myuitest.gd" id="2_vuo7p"]
+[ext_resource type="Shader" uid="uid://d28kkjvl2c2l2" path="res://shaders/ui/glass_panel.gdshader" id="3_eeoia"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_x00or"]
+shader = ExtResource("3_eeoia")
+shader_parameter/u_panel_size = Vector2(320, 180)
+shader_parameter/u_corner_radius = 30.0
+shader_parameter/u_distortion_intensity = 0.35
+shader_parameter/u_blur_intensity = 1.1
+shader_parameter/u_alpha = 0.34
+shader_parameter/u_tint = Color(0.9, 0.95, 1, 1)
+shader_parameter/u_tint_strength = 0.08
+shader_parameter/u_brightness = 1.02
+shader_parameter/u_gradient_strength = 0.08
+shader_parameter/u_edge_highlight_strength = 0.12
+
+[node name="MYUITEST" type="PanelContainer" unique_id=1466130031]
+clip_contents = true
+custom_minimum_size = Vector2(50, 50)
+mouse_filter = 1
+theme = ExtResource("1_bxyah")
+script = ExtResource("2_vuo7p")
+tint = Color(0.36078432, 0.3529412, 1, 1)
+content_padding = Vector2(30, 30)
+
+[node name="BlurRect" type="ColorRect" parent="." unique_id=816756352]
+material = SubResource("ShaderMaterial_x00or")
+layout_mode = 2
+mouse_filter = 2
+theme = ExtResource("1_bxyah")
+
+[node name="ContentMargin" type="MarginContainer" parent="." unique_id=1268098218]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 28
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 28

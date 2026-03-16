@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://bh8ca67ledv18"]
+
+[ext_resource type="Script" uid="uid://dobciu2vftjc5" path="res://scripts/ui/InspectorPanel.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://dw64dx08iy1dn" path="res://scenes/ui/MYUITEST.tscn" id="2"]
+
+[node name="InspectorPanel" type="Control" unique_id=1128572023]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 360.0
+offset_bottom = 520.0
+mouse_filter = 2
+script = ExtResource("1")
+
+[node name="InspectorGlass" parent="." unique_id=1989577954 instance=ExtResource("2")]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+blur_strength = 2.1
+tint = Color(0.9, 0.95, 1, 0.18)
