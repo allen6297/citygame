@@ -124,14 +124,6 @@ metadata/_custom_type_script = "uid://tw7pvw6yqnkk"
 
 [node name="MainUI" parent="UI" unique_id=2145038311 instance=ExtResource("2_ui")]
 
-[node name="RoadTerrain3DConnector" type="Node" parent="." unique_id=2075918317 node_paths=PackedStringArray("terrain", "road_manager")]
-script = ExtResource("6_c01mt")
-terrain = NodePath("../Terrain3D")
-road_manager = NodePath("../RoadManager")
-offset = -1.5
-flatten_terrain_method = 2
-metadata/_custom_type_script = "uid://cd2jpqgyj1i68"
-
 [node name="Terrain3D" type="Terrain3D" parent="." unique_id=94125071]
 data_directory = "res://demo/data"
 material = SubResource("Terrain3DMaterial_jrc01")
@@ -142,3 +134,11 @@ metadata/_edit_lock_ = true
 
 [node name="Terrain3DParticles" parent="Terrain3D" unique_id=188631932 node_paths=PackedStringArray("terrain") instance=ExtResource("3_q8u5g")]
 terrain = NodePath("..")
+
+[node name="RoadTerrain3DConnector" type="Node" parent="." unique_id=2075918317 node_paths=PackedStringArray("terrain", "road_manager")]
+script = ExtResource("6_c01mt")
+terrain = NodePath("../Terrain3D")
+road_manager = NodePath("../RoadManager")
+offset = -1.5
+flatten_terrain_method = 2
+metadata/_custom_type_script = "uid://cd2jpqgyj1i68"

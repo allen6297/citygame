@@ -12,6 +12,9 @@ uniform float u_tint_strength : hint_range(0.0, 1.0) = 0.14;
 uniform float u_brightness : hint_range(0.5, 1.5) = 1.02;
 uniform float u_gradient_strength : hint_range(0.0, 0.5) = 0.08;
 uniform float u_edge_highlight_strength : hint_range(0.0, 0.5) = 0.12;
+uniform float u_warp_strength : hint_range(0.0, 8.0) = 1.6;
+uniform float u_warp_scale : hint_range(1.0, 40.0) = 12.0;
+uniform float u_warp_speed : hint_range(0.0, 3.0) = 0.25;
 
 float rounded_box_sdf(vec2 p, vec2 half_extents, float radius) {
 	vec2 q = abs(p) - (half_extents - vec2(radius));
@@ -43,7 +46,7 @@ void fragment() {
 	float dist = rounded_box_sdf(local_pos, half_size, corner_radius);
 	float aa = max(fwidth(dist), 1.0);
 	float mask = 1.0 - smoothstep(0.0, aa, dist);
-
+ 
 	if (mask <= 0.0) {
 		discard;
 	}
@@ -55,8 +58,20 @@ void fragment() {
 	float vertical_gradient = mix(1.0 + u_gradient_strength, 1.0 - u_gradient_strength, UV.y);
 
 	float distortion = edge_factor * edge_factor;
-	vec2 offset_pixels = distortion * safe_normal * corner_radius * u_distortion_intensity;
-	vec2 target_uv = SCREEN_UV - (offset_pixels * SCREEN_PIXEL_SIZE);
+	vec2 edge_offset_pixels = distortion * safe_normal * corner_radius * u_distortion_intensity;
+
+	float t = TIME * u_warp_speed;
+	vec2 warp_wave = vec2(
+		sin(UV.y * u_warp_scale + t) + cos(UV.y * (u_warp_scale * 0.61) - t * 1.3),
+		cos(UV.x * u_warp_scale - t * 0.9) + sin(UV.x * (u_warp_scale * 0.73) + t * 1.1)
+	) * 0.5;
+
+	float interior_warp_factor = 0.35 + center_factor * 0.65;
+	vec2 interior_offset_pixels = warp_wave * u_warp_strength * interior_warp_factor;
+
+	vec2 total_offset_pixels = edge_offset_pixels + interior_offset_pixels;
+	vec2 target_uv = SCREEN_UV - (total_offset_pixels * SCREEN_PIXEL_SIZE);
+
 	float current_blur_radius = mix(u_blur_intensity, u_blur_intensity * 0.7, center_factor);
 	vec2 chromatic_shift = safe_normal * edge_factor * 1.5 * SCREEN_PIXEL_SIZE;
 
