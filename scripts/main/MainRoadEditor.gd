@@ -1,8 +1,15 @@
 extends RefCounted
 class_name MainRoadEditor
 
+const RoadPointScript = preload("res://addons/road-generator/nodes/road_point.gd")
+
 
 func setup_visuals(main) -> void:
+	if main.placement_cursor == null:
+		main.placement_cursor = MeshInstance3D.new()
+		main.placement_cursor.name = "PlacementCursor"
+		main.add_child(main.placement_cursor)
+
 	var cursor_mesh := CylinderMesh.new()
 	cursor_mesh.top_radius = 0.55
 	cursor_mesh.bottom_radius = 0.55
@@ -11,18 +18,6 @@ func setup_visuals(main) -> void:
 	main.placement_cursor.mesh = cursor_mesh
 	main.placement_cursor.visible = true
 	main.placement_cursor.material_override = main.render_controller.create_unshaded_material(Color(0.25, 0.85, 1.0, 0.8))
-
-	main.preview_road = MeshInstance3D.new()
-	main.preview_road.name = "PreviewRoad"
-	main.preview_road.material_override = main.render_controller.create_unshaded_material(Color(0.1, 0.9, 1.0, 0.55))
-	main.add_child(main.preview_road)
-
-	main.curve_control_cursor = MeshInstance3D.new()
-	main.curve_control_cursor.name = "CurveControlCursor"
-	main.curve_control_cursor.mesh = cursor_mesh.duplicate()
-	main.curve_control_cursor.visible = false
-	main.curve_control_cursor.material_override = main.render_controller.create_unshaded_material(Color(1.0, 0.35, 0.75, 0.9))
-	main.add_child(main.curve_control_cursor)
 
 
 func process(main) -> void:
@@ -35,80 +30,75 @@ func handle_build_click(main) -> void:
 	if main.moving_node_id != -1:
 		return
 
-	if main.selected_start_node_id == -1:
-		var target_node_id: int = resolve_build_target_node(main, false)
-		if target_node_id == -1:
+	var ordered_points: Array = get_ordered_road_points(main)
+	if ordered_points.is_empty():
+		var road_point = _create_road_point(main, null, get_build_preview_position(main))
+		if road_point == null:
 			return
-		main.selected_start_node_id = target_node_id
-		reset_curve_control(main)
-		return
-
-	if main.curve_build_enabled and not main.curve_control_set:
-		main.curve_control_set = true
-		main.curve_control_position = get_curve_control_preview_position(main)
-		return
-
-	var target_node_id: int = resolve_build_target_node(main, true)
-	if target_node_id == -1:
-		return
-
-	if target_node_id == main.selected_start_node_id:
-		return
-
-	if not main.road_network.has_segment_between(main.selected_start_node_id, target_node_id):
-		var custom_points: Array[Vector3] = []
-		if main.curve_build_enabled and main.curve_control_set:
-			var start_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.selected_start_node_id)
-			var end_node: RoadNetworkData.RoadNode = main.road_network.get_node(target_node_id)
-			if start_node != null and end_node != null:
-				custom_points = build_curve_points(start_node.position, main.curve_control_position, end_node.position)
-		main.road_network.add_segment(main.selected_start_node_id, target_node_id, main.default_road_profile, custom_points)
+		main.hovered_node_id = road_point.get_instance_id()
 		main._rebuild_world()
-		main.selected_start_node_id = -1
-		reset_curve_control(main)
-	else:
-		main.selected_start_node_id = target_node_id
-		reset_curve_control(main)
+		return
+
+	var last_point = ordered_points[ordered_points.size() - 1]
+	var new_point = _create_road_point(main, last_point, get_build_preview_position(main))
+	if new_point == null:
+		return
+	if not last_point.connect_roadpoint(RoadPointScript.PointInit.NEXT, new_point, RoadPointScript.PointInit.PRIOR):
+		new_point.queue_free()
+		return
+	main.hovered_node_id = new_point.get_instance_id()
+	main._rebuild_world()
 
 
 func handle_edit_click(main) -> void:
 	if main.moving_node_id != -1:
 		return
-
 	if main.hovered_node_id != -1:
-		if main.road_network.combine_segments_at_node(main.hovered_node_id):
-			if main.selected_start_node_id == main.hovered_node_id:
-				main.selected_start_node_id = -1
-			main.hovered_node_id = -1
-			main.hovered_segment_id = -1
-			main._rebuild_world()
 		return
 
-	if main.hovered_segment_id != -1:
-		var insert_position: Vector3 = main.hovered_world_position
-		var inserted_node: RoadNetworkData.RoadNode = main.road_network.add_node_on_segment(main.hovered_segment_id, insert_position)
-		if inserted_node != null:
-			main.hovered_node_id = inserted_node.id
-			main.hovered_segment_id = -1
-			main._rebuild_world()
+	var segment_data: Dictionary = find_nearest_segment_data(main, main.hovered_world_position)
+	if segment_data.is_empty():
+		return
+
+	var start_point = segment_data["start"]
+	var end_point = segment_data["end"]
+	var new_point = _create_road_point(main, start_point, main.hovered_world_position)
+	if new_point == null:
+		return
+
+	start_point.disconnect_roadpoint(RoadPointScript.PointInit.NEXT, RoadPointScript.PointInit.PRIOR)
+	var connected_start: bool = start_point.connect_roadpoint(RoadPointScript.PointInit.NEXT, new_point, RoadPointScript.PointInit.PRIOR)
+	var connected_end: bool = new_point.connect_roadpoint(RoadPointScript.PointInit.NEXT, end_point, RoadPointScript.PointInit.PRIOR)
+	if not connected_start or not connected_end:
+		new_point.queue_free()
+		main._rebuild_world()
+		return
+
+	main.hovered_node_id = new_point.get_instance_id()
+	main._rebuild_world()
 
 
 func remove_hovered_or_selected_node(main) -> void:
 	if main.moving_node_id != -1:
 		return
 
-	var target_node_id: int = main.hovered_node_id
-	if target_node_id == -1:
-		target_node_id = main.selected_start_node_id
-	if target_node_id == -1:
+	var road_point = find_road_point_by_id(main, main.hovered_node_id)
+	if road_point == null:
 		return
 
-	if main.road_network.remove_node(target_node_id):
-		if main.selected_start_node_id == target_node_id:
-			main.selected_start_node_id = -1
-		main.hovered_node_id = -1
-		main.hovered_segment_id = -1
-		main._rebuild_world()
+	var prior_point = road_point.get_prior_road_node(true)
+	var next_point = road_point.get_next_road_node(true)
+
+	if prior_point != null:
+		road_point.disconnect_roadpoint(RoadPointScript.PointInit.PRIOR, RoadPointScript.PointInit.NEXT)
+	if next_point != null:
+		road_point.disconnect_roadpoint(RoadPointScript.PointInit.NEXT, RoadPointScript.PointInit.PRIOR)
+	if prior_point != null and next_point != null:
+		prior_point.connect_roadpoint(RoadPointScript.PointInit.NEXT, next_point, RoadPointScript.PointInit.PRIOR)
+
+	road_point.queue_free()
+	main.hovered_node_id = -1
+	main._rebuild_world()
 
 
 func toggle_node_move(main) -> void:
@@ -116,29 +106,22 @@ func toggle_node_move(main) -> void:
 		finish_node_move(main, true)
 		return
 
-	var target_node_id : int = main.hovered_node_id
-	if target_node_id == -1:
-		target_node_id = main.selected_start_node_id
-	if target_node_id == -1:
+	var road_point = find_road_point_by_id(main, main.hovered_node_id)
+	if road_point == null:
 		return
 
-	var node: RoadNetworkData.RoadNode = main.road_network.get_node(target_node_id)
-	if node == null:
-		return
-
-	main.moving_node_id = target_node_id
-	main.moving_node_original_position = node.position
-	main.moving_node_preview_position = node.position
-	main.selected_start_node_id = -1
-	reset_curve_control(main)
+	main.moving_node_id = road_point.get_instance_id()
+	main.moving_node_original_position = road_point.global_position
+	main.moving_node_preview_position = road_point.global_position
 
 
 func finish_node_move(main, commit: bool) -> void:
 	if main.moving_node_id == -1:
 		return
 
-	if not commit:
-		main.road_network.move_node(main.moving_node_id, main.moving_node_original_position)
+	var road_point = find_road_point_by_id(main, main.moving_node_id)
+	if road_point != null and not commit:
+		road_point.global_position = main.moving_node_original_position
 
 	main.moving_node_id = -1
 	main.moving_node_original_position = Vector3.ZERO
@@ -146,19 +129,12 @@ func finish_node_move(main, commit: bool) -> void:
 	main._rebuild_world()
 
 
-func toggle_curve_build(main) -> void:
-	main.curve_build_enabled = not main.curve_build_enabled
-	reset_curve_control(main)
+func toggle_curve_build(_main) -> void:
+	pass
 
 
-func reset_curve_build(main) -> void:
-	main.curve_build_enabled = false
-	reset_curve_control(main)
-
-
-func reset_curve_control(main) -> void:
-	main.curve_control_set = false
-	main.curve_control_position = Vector3.ZERO
+func reset_curve_build(_main) -> void:
+	pass
 
 
 func update_hover_state(main) -> void:
@@ -170,37 +146,42 @@ func update_hover_state(main) -> void:
 
 	main.hovered_world_raw_position = world_hit
 	main.hovered_world_position = world_hit
-	main.hovered_node_id = find_nearest_node_id(main, world_hit)
 	main.hovered_segment_id = -1
-	if main.hovered_node_id != -1:
-		var hovered_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.hovered_node_id)
-		if hovered_node != null:
-			main.hovered_world_position = hovered_node.position
-	else:
-		main.hovered_segment_id = find_nearest_segment_id(main, world_hit)
-		if main.hovered_segment_id != -1:
-			main.hovered_world_position = get_closest_point_on_segment(main.road_network.get_segment(main.hovered_segment_id), world_hit)
+
+	var road_point = find_nearest_road_point(main, world_hit)
+	if road_point != null:
+		main.hovered_node_id = road_point.get_instance_id()
+		main.hovered_world_position = road_point.global_position
+		return
+
+	main.hovered_node_id = -1
+	var segment_data: Dictionary = find_nearest_segment_data(main, world_hit)
+	if not segment_data.is_empty():
+		main.hovered_segment_id = int(segment_data["index"])
+		main.hovered_world_position = segment_data["closest"]
 
 
 func update_node_move(main) -> void:
 	if main.moving_node_id == -1:
 		return
-
 	if main.moving_node_preview_position.distance_squared_to(main.hovered_world_position) <= 0.0001:
 		return
 
+	var road_point = find_road_point_by_id(main, main.moving_node_id)
+	if road_point == null:
+		return
+
 	main.moving_node_preview_position = main.hovered_world_position
-	main.road_network.move_node(main.moving_node_id, main.hovered_world_position)
+	road_point.global_position = main.hovered_world_position
 	main._rebuild_world()
 
 
 func update_editor_visuals(main) -> void:
-	var cursor_world_position: Vector3 = get_cursor_preview_position(main)
+	if main.placement_cursor == null:
+		return
+
 	main.placement_cursor.visible = true
-	main.placement_cursor.position = cursor_world_position + Vector3.UP * (main.visual_height_offset + 0.06)
-	main.curve_control_cursor.visible = main.curve_build_enabled and main.curve_control_set
-	if main.curve_control_cursor.visible:
-		main.curve_control_cursor.position = main.curve_control_position + Vector3.UP * (main.visual_height_offset + 0.06)
+	main.placement_cursor.position = get_build_preview_position(main) + Vector3.UP * (main.visual_height_offset + 0.06)
 
 	var cursor_color := Color(0.25, 0.85, 1.0, 0.8)
 	if main.moving_node_id != -1:
@@ -211,46 +192,27 @@ func update_editor_visuals(main) -> void:
 		cursor_color = Color(1.0, 0.55, 0.25, 0.9)
 	main.placement_cursor.material_override = main.render_controller.create_unshaded_material(cursor_color)
 
-	main.preview_road.mesh = null
-	if main.selected_start_node_id == -1:
-		return
-
-	var start_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.selected_start_node_id)
-	if start_node == null:
-		main.selected_start_node_id = -1
-		return
-
-	var preview_end: Vector3 = get_build_preview_position(main)
-	if main.hovered_node_id != -1:
-		var hovered_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.hovered_node_id)
-		if hovered_node != null:
-			preview_end = hovered_node.position
-
-	main.preview_road.mesh = main.render_controller.build_road_mesh_for_segments(main, [_create_preview_segment(main, start_node.position, preview_end)])
-
-
-func resolve_build_target_node(main, allow_segment_insert: bool = true) -> int:
-	if main.hovered_node_id != -1:
-		return main.hovered_node_id
-
-	if allow_segment_insert and main.hovered_segment_id != -1:
-		var insert_position: Vector3 = main.hovered_world_position
-		var inserted_node: RoadNetworkData.RoadNode = main.road_network.add_node_on_segment(main.hovered_segment_id, insert_position)
-		if inserted_node != null:
-			main._rebuild_world()
-			return inserted_node.id
-		return -1
-
-	var created_node: RoadNetworkData.RoadNode = main.road_network.add_node(get_build_preview_position(main))
-	main._rebuild_world()
-	return created_node.id
-
 
 func get_mouse_world_position(main) -> Variant:
 	var viewport: Viewport = main.get_viewport()
 	var mouse_position: Vector2 = viewport.get_mouse_position()
 	var ray_origin: Vector3 = main.camera_3d.project_ray_origin(mouse_position)
 	var ray_direction: Vector3 = main.camera_3d.project_ray_normal(mouse_position)
+	if main.terrain_3d != null and main.terrain_3d.data != null:
+		var terrain_point: Variant = _project_mouse_to_terrain_height(main, ray_origin, ray_direction)
+		if terrain_point != null:
+			return terrain_point
+
+	var ray_target: Vector3 = ray_origin + ray_direction * 2000.0
+	var query := PhysicsRayQueryParameters3D.create(ray_origin, ray_target)
+	query.collide_with_bodies = true
+	query.collide_with_areas = false
+	query.exclude = _collect_road_collision_rids(main.road_manager)
+	var space_state: PhysicsDirectSpaceState3D = main.get_world_3d().direct_space_state
+	var hit: Dictionary = space_state.intersect_ray(query)
+	if not hit.is_empty():
+		return hit["position"]
+
 	if absf(ray_direction.y) < 0.0001:
 		return null
 
@@ -261,94 +223,128 @@ func get_mouse_world_position(main) -> Variant:
 	return ray_origin + (ray_direction * distance)
 
 
-func find_nearest_node_id(main, world_position: Vector3) -> int:
+func _project_mouse_to_terrain_height(main, ray_origin: Vector3, ray_direction: Vector3) -> Variant:
+	var max_distance: float = 2000.0
+	var step_count: int = 96
+	var previous_point: Vector3 = ray_origin
+	var previous_delta: float = previous_point.y - main.terrain_3d.data.get_height(previous_point)
+
+	for step_index in range(1, step_count + 1):
+		var t: float = max_distance * float(step_index) / float(step_count)
+		var point: Vector3 = ray_origin + (ray_direction * t)
+		var terrain_height: float = main.terrain_3d.data.get_height(point)
+		var delta: float = point.y - terrain_height
+		if delta <= 0.0:
+			var refined_point: Vector3 = _refine_terrain_intersection(main, previous_point, point)
+			refined_point.y = main.terrain_3d.data.get_height(refined_point)
+			return refined_point
+		previous_point = point
+		previous_delta = delta
+
+	return null
+
+
+func _refine_terrain_intersection(main, from_point: Vector3, to_point: Vector3) -> Vector3:
+	var low: Vector3 = from_point
+	var high: Vector3 = to_point
+	for _iteration in range(12):
+		var midpoint: Vector3 = low.lerp(high, 0.5)
+		var terrain_height: float = main.terrain_3d.data.get_height(midpoint)
+		if midpoint.y - terrain_height > 0.0:
+			low = midpoint
+		else:
+			high = midpoint
+	return low.lerp(high, 0.5)
+
+
+func _collect_road_collision_rids(root: Node) -> Array[RID]:
+	var rids: Array[RID] = []
+	if root == null:
+		return rids
+	_collect_collision_rids_recursive(root, rids)
+	return rids
+
+
+func _collect_collision_rids_recursive(node: Node, rids: Array[RID]) -> void:
+	if node is CollisionObject3D:
+		rids.append((node as CollisionObject3D).get_rid())
+	for child in node.get_children():
+		_collect_collision_rids_recursive(child, rids)
+
+
+func get_build_preview_position(main) -> Vector3:
+	return main.hovered_world_position
+
+
+func get_ordered_road_points(main) -> Array:
+	if main.road_container == null:
+		return []
+
+	var points: Array = main.road_container.get_roadpoints()
+	if points.is_empty():
+		return points
+
+	var start_point = points[0].get_last_rp(RoadPointScript.PointInit.PRIOR)
+	if start_point == null:
+		start_point = points[0]
+
+	var ordered_points: Array = []
+	var visited := {}
+	var current = start_point
+	while current != null and not visited.has(current.get_instance_id()):
+		visited[current.get_instance_id()] = true
+		ordered_points.append(current)
+		current = current.get_next_road_node(true)
+	return ordered_points
+
+
+func find_nearest_road_point(main, world_position: Vector3):
 	var snap_limit := get_scaled_snap_distance(main, main.road_snap_distance)
 	var best_distance := snap_limit
-	var best_id := -1
-	for node: RoadNetworkData.RoadNode in main.road_network.nodes:
-		var distance := node.position.distance_to(world_position)
+	var best_point = null
+	for road_point in get_ordered_road_points(main):
+		var distance: float = road_point.global_position.distance_to(world_position)
 		if distance < best_distance:
 			best_distance = distance
-			best_id = node.id
-	return best_id
+			best_point = road_point
+	return best_point
 
 
-func find_nearest_segment_id(main, world_position: Vector3) -> int:
+func find_nearest_segment_data(main, world_position: Vector3) -> Dictionary:
+	var ordered_points: Array = get_ordered_road_points(main)
+	if ordered_points.size() < 2:
+		return {}
+
 	var snap_limit := get_scaled_snap_distance(main, main.segment_snap_distance)
 	var best_distance := snap_limit
-	var best_id := -1
-	for segment: RoadNetworkData.RoadSegment in main.road_network.segments:
-		var closest_point := get_closest_point_on_segment(segment, world_position)
-		var distance := closest_point.distance_to(world_position)
+	var best_data := {}
+	for index in range(1, ordered_points.size()):
+		var start_point = ordered_points[index - 1]
+		var end_point = ordered_points[index]
+		var closest_point := get_closest_point_on_line(start_point.global_position, end_point.global_position, world_position)
+		var distance: float = closest_point.distance_to(world_position)
 		if distance < best_distance:
 			best_distance = distance
-			best_id = segment.id
-	return best_id
+			best_data = {
+				"index": index,
+				"start": start_point,
+				"end": end_point,
+				"closest": closest_point,
+			}
+	return best_data
+
+
+func find_road_point_by_id(main, instance_id: int):
+	if instance_id == -1:
+		return null
+	for road_point in get_ordered_road_points(main):
+		if road_point.get_instance_id() == instance_id:
+			return road_point
+	return null
 
 
 func get_scaled_snap_distance(main, base_distance: float) -> float:
 	return max(base_distance, main.camera_3d.size * 0.05)
-
-
-func get_cursor_preview_position(main) -> Vector3:
-	if main.curve_build_enabled and main.selected_start_node_id != -1 and not main.curve_control_set:
-		return get_curve_control_preview_position(main)
-	return get_build_preview_position(main)
-
-
-func get_curve_control_preview_position(main) -> Vector3:
-	if main.selected_start_node_id == -1:
-		return main.hovered_world_position
-
-	var start_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.selected_start_node_id)
-	if start_node == null:
-		return main.hovered_world_position
-	return get_angle_snapped_position(start_node.position, main.hovered_world_position, main.segment_angle_snap_degrees)
-
-
-func get_build_preview_position(main) -> Vector3:
-	if main.selected_start_node_id == -1:
-		return main.hovered_world_position
-	if main.hovered_node_id != -1 or main.hovered_segment_id != -1:
-		return main.hovered_world_position
-	if main.curve_build_enabled and not main.curve_control_set:
-		return main.hovered_world_position
-
-	var start_node: RoadNetworkData.RoadNode = main.road_network.get_node(main.selected_start_node_id)
-	if start_node == null:
-		return main.hovered_world_position
-	return get_angle_snapped_position(start_node.position, main.hovered_world_position, main.segment_angle_snap_degrees)
-
-
-func get_angle_snapped_position(start_position: Vector3, target_position: Vector3, snap_degrees: float) -> Vector3:
-	if snap_degrees <= 0.0:
-		return target_position
-
-	var planar_offset: Vector3 = target_position - start_position
-	planar_offset.y = 0.0
-	if planar_offset.length_squared() <= 0.0001:
-		return target_position
-
-	var snap_radians: float = deg_to_rad(snap_degrees)
-	var angle: float = atan2(planar_offset.z, planar_offset.x)
-	var snapped_angle: float = round(angle / snap_radians) * snap_radians
-	var snapped_offset: Vector3 = Vector3(cos(snapped_angle), 0.0, sin(snapped_angle)) * planar_offset.length()
-	return Vector3(start_position.x + snapped_offset.x, target_position.y, start_position.z + snapped_offset.z)
-
-
-func get_closest_point_on_segment(segment: RoadNetworkData.RoadSegment, world_position: Vector3) -> Vector3:
-	if segment == null or segment.points.size() < 2:
-		return world_position
-
-	var best_point := segment.points[0]
-	var best_distance := INF
-	for index in range(1, segment.points.size()):
-		var point := get_closest_point_on_line(segment.points[index - 1], segment.points[index], world_position)
-		var distance := point.distance_squared_to(world_position)
-		if distance < best_distance:
-			best_distance = distance
-			best_point = point
-	return best_point
 
 
 func get_closest_point_on_line(start: Vector3, end: Vector3, point: Vector3) -> Vector3:
@@ -361,29 +357,31 @@ func get_closest_point_on_line(start: Vector3, end: Vector3, point: Vector3) -> 
 	return start + (segment_vector * weight)
 
 
-func _create_preview_segment(main, start_position: Vector3, end_position: Vector3) -> RoadNetworkData.RoadSegment:
-	var segment := RoadNetworkData.RoadSegment.new()
-	segment.road_profile = main.default_road_profile
-	if main.curve_build_enabled and main.curve_control_set:
-		segment.points = build_curve_points(start_position, main.curve_control_position, end_position)
+func _create_road_point(main, reference_point, position: Vector3):
+	if main.road_container == null:
+		return null
+
+	var road_point = RoadPointScript.new()
+	main.road_container.add_child(road_point)
+	if reference_point != null:
+		road_point.copy_settings_from(reference_point, false)
 	else:
-		segment.points = [start_position, end_position]
-	return segment
+		_configure_default_point(main, road_point)
+	road_point.position = main.road_container.to_local(position)
+	return road_point
 
 
-func build_curve_points(start_position: Vector3, control_position: Vector3, end_position: Vector3) -> Array[Vector3]:
-	var points: Array[Vector3] = []
-	var sample_count := 12
-	for index in range(sample_count + 1):
-		var t := float(index) / float(sample_count)
-		points.append(_sample_quadratic_bezier(start_position, control_position, end_position, t))
-	return points
-
-
-func _sample_quadratic_bezier(start_position: Vector3, control_position: Vector3, end_position: Vector3, t: float) -> Vector3:
-	var one_minus_t := 1.0 - t
-	return (
-		start_position * one_minus_t * one_minus_t
-		+ control_position * 2.0 * one_minus_t * t
-		+ end_position * t * t
-	)
+func _configure_default_point(main, road_point) -> void:
+	road_point.auto_lanes = true
+	road_point.traffic_dir.clear()
+	for _lane_index in range(max(main.default_road_profile.lanes_backward, 0)):
+		road_point.traffic_dir.append(RoadPointScript.LaneDir.REVERSE)
+	for _lane_index in range(max(main.default_road_profile.lanes_forward, 0)):
+		road_point.traffic_dir.append(RoadPointScript.LaneDir.FORWARD)
+	if road_point.traffic_dir.is_empty():
+		road_point.traffic_dir.append(RoadPointScript.LaneDir.BOTH)
+	road_point.assign_lanes()
+	road_point.lane_width = main.default_road_profile.lane_width
+	road_point.shoulder_width_l = main.default_road_profile.sidewalk_left + main.default_road_profile.curb_size
+	road_point.shoulder_width_r = main.default_road_profile.sidewalk_right + main.default_road_profile.curb_size
+	road_point.gutter_profile = Vector2.ZERO

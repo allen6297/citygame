@@ -54,15 +54,6 @@ func create_render_chunk_node(main, chunk_coord: Vector2i) -> Node3D:
 	if render_chunk == null:
 		return chunk_root
 
-	var chunk_segments := get_segments_by_ids(main, render_chunk.segment_ids)
-	if not chunk_segments.is_empty():
-		var road_mesh_instance := MeshInstance3D.new()
-		road_mesh_instance.name = "Roads"
-		road_mesh_instance.mesh = road_renderer.build_road_mesh_for_segments(main, chunk_segments)
-		road_mesh_instance.material_override = road_renderer.create_road_material()
-		road_mesh_instance.material_overlay = road_renderer.get_wireframe_overlay_material() if main.wireframe_debug_active else null
-		chunk_root.add_child(road_mesh_instance)
-
 	var chunk_nodes := get_nodes_by_ids(main, render_chunk.node_ids)
 	if not chunk_nodes.is_empty():
 		var node_mesh_instance := MeshInstance3D.new()
@@ -72,15 +63,6 @@ func create_render_chunk_node(main, chunk_coord: Vector2i) -> Node3D:
 		chunk_root.add_child(node_mesh_instance)
 
 	return chunk_root
-
-
-func get_segments_by_ids(main, segment_ids: Array[int]) -> Array[RoadNetworkData.RoadSegment]:
-	var result: Array[RoadNetworkData.RoadSegment] = []
-	for segment_id in segment_ids:
-		var segment: RoadNetworkData.RoadSegment = main.road_network.get_segment(segment_id)
-		if segment != null:
-			result.append(segment)
-	return result
 
 
 func get_nodes_by_ids(main, node_ids: Array[int]) -> Array[RoadNetworkData.RoadNode]:

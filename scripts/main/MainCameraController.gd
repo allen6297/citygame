@@ -13,15 +13,16 @@ func configure_camera(main) -> void:
 
 
 func center_camera_on_network(main) -> void:
-	if main.road_network.nodes.is_empty():
+	var road_points: Array = main.get_road_points()
+	if road_points.is_empty():
 		main.camera_pivot.position = Vector3.ZERO
 		return
 
-	var minimum: Vector3 = main.road_network.nodes[0].position
-	var maximum: Vector3 = main.road_network.nodes[0].position
-	for node: RoadNetworkData.RoadNode in main.road_network.nodes:
-		minimum = minimum.min(node.position)
-		maximum = maximum.max(node.position)
+	var minimum: Vector3 = road_points[0].global_position
+	var maximum: Vector3 = road_points[0].global_position
+	for road_point in road_points:
+		minimum = minimum.min(road_point.global_position)
+		maximum = maximum.max(road_point.global_position)
 
 	main.camera_pivot.position = (minimum + maximum) * 0.5
 

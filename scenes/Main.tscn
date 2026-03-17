@@ -1,15 +1,78 @@
 [gd_scene format=3 uid="uid://b3jj0lt3qg4p5"]
 
 [ext_resource type="Script" uid="uid://cg65y6pc5m8km" path="res://scripts/Main.gd" id="1_la3hm"]
+[ext_resource type="Terrain3DAssets" uid="uid://dal3jhw6241qg" path="res://demo/data/assets.tres" id="2_jlsqs"]
+[ext_resource type="Script" uid="uid://2uloqgwjaxor" path="res://addons/road-generator/nodes/road_manager.gd" id="2_rarhs"]
 [ext_resource type="PackedScene" uid="uid://b5hxvi6pao7x0" path="res://scenes/ui/MainUI.tscn" id="2_ui"]
+[ext_resource type="PackedScene" uid="uid://d3sr0a7dxfkr8" path="res://addons/terrain_3d/extras/particle_example/Terrain3DParticles.tscn" id="3_q8u5g"]
+[ext_resource type="Script" uid="uid://buny84ifqevyf" path="res://addons/road-generator/nodes/road_container.gd" id="3_vcsgt"]
+[ext_resource type="Script" uid="uid://tw7pvw6yqnkk" path="res://addons/road-generator/nodes/road_point.gd" id="4_vcsgt"]
+[ext_resource type="Script" uid="uid://cd2jpqgyj1i68" path="res://addons/road-generator/connectors/terrain3d_road_connector.gd" id="6_c01mt"]
 
-[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_u57aq"]
-albedo_color = Color(0.33, 0.45, 0.31, 1)
+[sub_resource type="Gradient" id="Gradient_vr1m7"]
+offsets = PackedFloat32Array(0.2, 1)
+colors = PackedColorArray(1, 1, 1, 1, 0, 0, 0, 1)
 
-[sub_resource type="PlaneMesh" id="PlaneMesh_20xrn"]
-size = Vector2(48, 48)
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_d8lcj"]
+noise_type = 2
+frequency = 0.03
+cellular_jitter = 3.0
+cellular_return_type = 0
+domain_warp_enabled = true
+domain_warp_type = 1
+domain_warp_amplitude = 50.0
+domain_warp_fractal_type = 2
+domain_warp_fractal_lacunarity = 1.5
+domain_warp_fractal_gain = 1.0
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_bov7h"]
+noise = SubResource("FastNoiseLite_d8lcj")
+color_ramp = SubResource("Gradient_vr1m7")
+seamless = true
+
+[sub_resource type="Terrain3DMaterial" id="Terrain3DMaterial_jrc01"]
+_shader_parameters = {
+"_mouse_layer": 2147483648,
+"auto_base_texture": 0,
+"auto_height_reduction": 0.05,
+"auto_overlay_texture": 1,
+"auto_slope": 0.45,
+"bias_distance": 512.0,
+"blend_sharpness": 0.5,
+"depth_blur": 0.0,
+"dual_scale_far": 170.0,
+"dual_scale_near": 100.0,
+"dual_scale_reduction": 0.3,
+"dual_scale_texture": 0,
+"enable_macro_variation": true,
+"enable_projection": true,
+&"flat_terrain_normals": false,
+"macro_variation1": Color(0.855, 0.8625, 0.9, 1),
+"macro_variation2": Color(0.9, 0.885, 0.81, 1),
+"macro_variation_slope": 0.333,
+"mipmap_bias": 1.0,
+"noise1_angle": 0.1,
+"noise1_offset": Vector2(0.5, 0.5),
+"noise1_scale": 0.04,
+"noise2_scale": 0.076,
+"noise_texture": SubResource("NoiseTexture2D_bov7h"),
+"projection_threshold": 0.87,
+"tri_scale_reduction": 0.3,
+"world_noise_fragment_normals": false,
+"world_noise_height": 34.0,
+"world_noise_lod_distance": 7500.0,
+"world_noise_max_octaves": 4,
+"world_noise_min_octaves": 2,
+"world_noise_offset": Vector3(2.17, -1.225, 1.9),
+"world_noise_region_blend": 0.33,
+"world_noise_scale": 9.85
+}
+world_background = 2
+auto_shader = true
+dual_scaling = true
 
 [node name="Main" type="Node3D" unique_id=1839986298]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.19530296, 0)
 script = ExtResource("1_la3hm")
 
 [node name="Sun" type="DirectionalLight3D" parent="." unique_id=428098137]
@@ -25,14 +88,57 @@ transform = Transform3D(1, 0, 0, 0, 0.5735765, 0.819152, 0, -0.819152, 0.5735765
 transform = Transform3D(0.42261827, 0.9063078, -6.75252e-09, -0.83731925, 0.39044836, 0.38268346, 0.346829, -0.16172901, 0.92387956, -25, 10, 0)
 current = true
 
-[node name="Ground" type="MeshInstance3D" parent="." unique_id=577990525]
-material_override = SubResource("StandardMaterial3D_u57aq")
-mesh = SubResource("PlaneMesh_20xrn")
+[node name="RoadManager" type="Node3D" parent="." unique_id=1191006643]
+script = ExtResource("2_rarhs")
+metadata/_custom_type_script = "uid://2uloqgwjaxor"
 
-[node name="PlacementCursor" type="MeshInstance3D" parent="." unique_id=1953680457]
+[node name="RoadContainer" type="Node3D" parent="RoadManager" unique_id=1255311662]
+script = ExtResource("3_vcsgt")
+use_lowpoly_preview = true
+draw_lanes_editor = true
+draw_lanes_game = true
+edge_containers = Array[NodePath]([NodePath(""), NodePath(""), NodePath(""), NodePath("")])
+edge_rp_targets = Array[NodePath]([NodePath(""), NodePath(""), NodePath(""), NodePath("")])
+edge_rp_target_dirs = Array[int]([-1, -1, -1, -1])
+edge_rp_locals = Array[NodePath]([NodePath("RoadPoint"), NodePath("RoadPoint"), NodePath("RoadPoint2"), NodePath("RoadPoint2")])
+edge_rp_local_dirs = Array[int]([0, 1, 0, 1])
+metadata/_custom_type_script = "uid://buny84ifqevyf"
 
-[node name="RoadChunks" type="Node3D" parent="." unique_id=212345003]
+[node name="RoadPoint" type="Node3D" parent="RoadManager/RoadContainer" unique_id=1371726783]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
+script = ExtResource("4_vcsgt")
+traffic_dir = Array[int]([2, 2, 1, 1])
+lanes = Array[int]([2, 4, 4, 2])
+next_mag = 21.856956
+metadata/_custom_type_script = "uid://tw7pvw6yqnkk"
+
+[node name="RoadPoint2" type="Node3D" parent="RoadManager/RoadContainer" unique_id=2025672805]
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, -18.122839)
+script = ExtResource("4_vcsgt")
+traffic_dir = Array[int]([2, 2, 1, 1])
+lanes = Array[int]([2, 4, 4, 2])
+next_mag = 21.856956
+metadata/_custom_type_script = "uid://tw7pvw6yqnkk"
 
 [node name="UI" type="CanvasLayer" parent="." unique_id=212345004]
 
 [node name="MainUI" parent="UI" unique_id=2145038311 instance=ExtResource("2_ui")]
+
+[node name="RoadTerrain3DConnector" type="Node" parent="." unique_id=2075918317 node_paths=PackedStringArray("terrain", "road_manager")]
+script = ExtResource("6_c01mt")
+terrain = NodePath("../Terrain3D")
+road_manager = NodePath("../RoadManager")
+offset = -1.5
+flatten_terrain_method = 2
+metadata/_custom_type_script = "uid://cd2jpqgyj1i68"
+
+[node name="Terrain3D" type="Terrain3D" parent="." unique_id=94125071]
+data_directory = "res://demo/data"
+material = SubResource("Terrain3DMaterial_jrc01")
+assets = ExtResource("2_jlsqs")
+collision_mask = 3
+top_level = true
+metadata/_edit_lock_ = true
+
+[node name="Terrain3DParticles" parent="Terrain3D" unique_id=188631932 node_paths=PackedStringArray("terrain") instance=ExtResource("3_q8u5g")]
+terrain = NodePath("..")

@@ -23,6 +23,10 @@ window/size/viewport_height=1296
 
 project/assembly_name="citygame"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/road-generator/plugin.cfg", "res://addons/terrain_3d/plugin.cfg")
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

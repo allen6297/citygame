@@ -109,8 +109,8 @@ func _add_segment_mesh(main, st: SurfaceTool, segment: RoadNetworkData.RoadSegme
 	for index in range(points.size()):
 		point_widths[index] = segment_width
 
-	var start_join: Dictionary = _get_path_endpoint_join(node_join_lookup, segment.start_node_id, segment.id)
-	var end_join: Dictionary = _get_path_endpoint_join(node_join_lookup, segment.end_node_id, segment.id)
+	var start_join: Dictionary = _get_path_endpoint_join(node_join_lookup, segment, segment.start_node_id)
+	var end_join: Dictionary = _get_path_endpoint_join(node_join_lookup, segment, segment.end_node_id)
 	if not start_join.is_empty():
 		elevated_points[0] = start_join["center"]
 	if not end_join.is_empty():
@@ -122,12 +122,8 @@ func _add_segment_mesh(main, st: SurfaceTool, segment: RoadNetworkData.RoadSegme
 		if index == 0 or index == elevated_points.size() - 1:
 			var endpoint_join: Dictionary = start_join if index == 0 else end_join
 			if not endpoint_join.is_empty():
-				if index == 0:
-					left_points.append(endpoint_join["left"])
-					right_points.append(endpoint_join["right"])
-				else:
-					left_points.append(endpoint_join["right"])
-					right_points.append(endpoint_join["left"])
+				left_points.append(endpoint_join["left"])
+				right_points.append(endpoint_join["right"])
 				continue
 
 			var forward: Vector3 = _get_polyline_direction(elevated_points, index)
@@ -272,17 +268,22 @@ func _build_node_join_data(main, node: RoadNetworkData.RoadNode) -> Dictionary:
 		return float(a["angle"]) < float(b["angle"])
 	)
 	for index in range(approaches.size()):
+		var road_width: float = float(approaches[index]["half_width"]) * 2.0
+		var base_setback: float = min(
+			road_width * float(main.intersection_setback_multiplier),
+			float(approaches[index]["trim_limit"])
+		)
 		approaches[index]["left_join"] = Vector3.ZERO
 		approaches[index]["right_join"] = Vector3.ZERO
 		approaches[index]["center_join"] = Vector3.ZERO
-		approaches[index]["left_trim_distance"] = 0.25
-		approaches[index]["right_trim_distance"] = 0.25
-		approaches[index]["trim_distance"] = 0.25
+		approaches[index]["left_trim_distance"] = base_setback
+		approaches[index]["right_trim_distance"] = base_setback
+		approaches[index]["trim_distance"] = base_setback
 	var join_by_segment_id: Dictionary = {}
 	for index in range(approaches.size()):
 		var current: Dictionary = approaches[index]
 		var next: Dictionary = approaches[(index + 1) % approaches.size()]
-		var corner_requirements: Dictionary = _compute_corner_trim_requirements(current, next)
+		var corner_requirements: Dictionary = _compute_corner_trim_requirements(current, next, "right_edge_origin", "left_edge_origin")
 		approaches[index]["corner_to_next_debug"] = corner_requirements
 		approaches[index]["right_trim_distance"] = max(float(approaches[index]["right_trim_distance"]), float(corner_requirements["current_trim"]))
 		approaches[(index + 1) % approaches.size()]["left_trim_distance"] = max(float(approaches[(index + 1) % approaches.size()]["left_trim_distance"]), float(corner_requirements["next_trim"]))
@@ -298,18 +299,15 @@ func _build_node_join_data(main, node: RoadNetworkData.RoadNode) -> Dictionary:
 		approaches[index]["right_join"] = right_join
 		approaches[index]["center_join"] = center_join
 		join_by_segment_id[int(approach["segment_id"])] = {"segment_id": int(approach["segment_id"]), "left": left_join, "right": right_join, "center": center_join}
-	var corner_curves: Array[Dictionary] = []
-	for index in range(approaches.size()):
-		var current_approach: Dictionary = approaches[index]
-		var next_approach: Dictionary = approaches[(index + 1) % approaches.size()]
-		corner_curves.append({
-			"from_segment_id": int(current_approach["segment_id"]),
-			"to_segment_id": int(next_approach["segment_id"]),
-			"points": _build_local_corner_curve(main.visual_height_offset, current_approach, next_approach),
-		})
+	var corner_entries: Array[Dictionary] = _build_sorted_corner_entries(node.position, approaches)
 	if DEBUG_INTERSECTION_JOINS:
-		_print_node_join_debug(node, approaches, corner_curves)
-	return {"node_id": node.id, "approaches": approaches, "join_by_segment_id": join_by_segment_id, "corner_curves": corner_curves}
+		_print_node_join_debug(node, approaches, corner_entries)
+	return {
+		"node_id": node.id,
+		"approaches": approaches,
+		"join_by_segment_id": join_by_segment_id,
+		"corner_entries": corner_entries,
+	}
 
 
 func _build_segment_approach(main, node: RoadNetworkData.RoadNode, segment: RoadNetworkData.RoadSegment) -> Dictionary:
@@ -333,6 +331,8 @@ func _build_segment_approach(main, node: RoadNetworkData.RoadNode, segment: Road
 		"trim_limit": trim_limit,
 		"left_edge_origin": node.position - normal * half_width,
 		"right_edge_origin": node.position + normal * half_width,
+		"left_edge_angle": atan2((node.position - normal * half_width).z - node.position.z, (node.position - normal * half_width).x - node.position.x),
+		"right_edge_angle": atan2((node.position + normal * half_width).z - node.position.z, (node.position + normal * half_width).x - node.position.x),
 	}
 
 
@@ -343,9 +343,9 @@ func _get_segment_trim_limit(segment_points: Array[Vector3], width: float) -> fl
 	return max(min(width, first_leg_length * 0.45), MIN_JOIN_TRIM)
 
 
-func _compute_corner_trim_requirements(current: Dictionary, next: Dictionary) -> Dictionary:
-	var current_edge_origin: Vector3 = current["right_edge_origin"]
-	var next_edge_origin: Vector3 = next["left_edge_origin"]
+func _compute_corner_trim_requirements(current: Dictionary, next: Dictionary, current_edge_key: String, next_edge_key: String) -> Dictionary:
+	var current_edge_origin: Vector3 = current[current_edge_key]
+	var next_edge_origin: Vector3 = next[next_edge_key]
 	var current_direction: Vector3 = current["direction"]
 	var next_direction: Vector3 = next["direction"]
 	var signed_turn: float = _signed_turn_2d(current_direction, next_direction)
@@ -357,6 +357,8 @@ func _compute_corner_trim_requirements(current: Dictionary, next: Dictionary) ->
 			"intersection_point": current_edge_origin,
 			"step_back_a": current_edge_origin,
 			"step_back_b": next_edge_origin,
+			"current_edge_key": current_edge_key,
+			"next_edge_key": next_edge_key,
 		}
 	var edge_intersection: Dictionary = _intersect_offset_rays(current_edge_origin, current_direction, next_edge_origin, next_direction)
 	if bool(edge_intersection.get("valid", false)):
@@ -379,6 +381,8 @@ func _compute_corner_trim_requirements(current: Dictionary, next: Dictionary) ->
 			"intersection_point": edge_intersection["point"],
 			"step_back_a": current_edge_origin + current_direction * current_trim,
 			"step_back_b": next_edge_origin + next_direction * next_trim,
+			"current_edge_key": current_edge_key,
+			"next_edge_key": next_edge_key,
 		}
 	var fallback_current_trim: float = min(float(current["half_width"]) * 0.5, float(current["trim_limit"]))
 	var fallback_next_trim: float = min(float(next["half_width"]) * 0.5, float(next["trim_limit"]))
@@ -389,6 +393,8 @@ func _compute_corner_trim_requirements(current: Dictionary, next: Dictionary) ->
 		"intersection_point": current_edge_origin,
 		"step_back_a": current_edge_origin + current_direction * fallback_current_trim,
 		"step_back_b": next_edge_origin + next_direction * fallback_next_trim,
+		"current_edge_key": current_edge_key,
+		"next_edge_key": next_edge_key,
 	}
 
 
@@ -403,6 +409,8 @@ func _intersect_offset_rays(start_a: Vector3, dir_a: Vector3, start_b: Vector3, 
 	var delta: Vector2 = point_b - point_a
 	var distance_a: float = (delta.x * vector_b.y - delta.y * vector_b.x) / determinant
 	var distance_b: float = (delta.x * vector_a.y - delta.y * vector_a.x) / determinant
+	if distance_a < 0.0 or distance_b < 0.0:
+		return {"valid": false}
 	return {
 		"valid": true,
 		"distance_a": distance_a,
@@ -411,14 +419,22 @@ func _intersect_offset_rays(start_a: Vector3, dir_a: Vector3, start_b: Vector3, 
 	}
 
 
-func _get_path_endpoint_join(node_join_lookup: Dictionary, node_id: int, segment_id: int) -> Dictionary:
+func _get_path_endpoint_join(node_join_lookup: Dictionary, segment: RoadNetworkData.RoadSegment, node_id: int) -> Dictionary:
 	if not node_join_lookup.has(node_id):
 		return {}
 	var node_join: Dictionary = node_join_lookup[node_id]
 	var join_by_segment_id: Dictionary = node_join.get("join_by_segment_id", {})
-	if not join_by_segment_id.has(segment_id):
+	if not join_by_segment_id.has(segment.id):
 		return {}
-	return join_by_segment_id[segment_id]
+	var endpoint_join: Dictionary = join_by_segment_id[segment.id]
+	if segment.start_node_id == node_id:
+		return endpoint_join
+	return {
+		"segment_id": int(endpoint_join.get("segment_id", segment.id)),
+		"left": endpoint_join["right"],
+		"right": endpoint_join["left"],
+		"center": endpoint_join["center"],
+	}
 
 
 func _add_intersection_fills(st: SurfaceTool, node_join_lookup: Dictionary) -> void:
@@ -432,7 +448,7 @@ func _add_intersection_fill_for_node_join(st: SurfaceTool, node_join: Dictionary
 	if approaches.size() < 3:
 		return
 	var raw_perimeter_points: Array[Vector3] = _build_intersection_perimeter_from_curves(node_join)
-	var perimeter_points: Array[Vector3] = _ensure_counter_clockwise(_dedupe_perimeter_loop(raw_perimeter_points))
+	var perimeter_points: Array[Vector3] = _ensure_counter_clockwise(_remove_nearly_collinear_points(_dedupe_perimeter_loop(raw_perimeter_points)))
 	if DEBUG_INTERSECTION_JOINS:
 		_print_intersection_perimeter_debug(int(node_join.get("node_id", -1)), raw_perimeter_points, perimeter_points)
 	if perimeter_points.size() < 3:
@@ -442,6 +458,7 @@ func _add_intersection_fill_for_node_join(st: SurfaceTool, node_join: Dictionary
 		polygon_2d.append(Vector2(point.x, point.z))
 	var triangulation: PackedInt32Array = Geometry2D.triangulate_polygon(polygon_2d)
 	if triangulation.is_empty():
+		_add_intersection_fill_fan_fallback(st, perimeter_points)
 		return
 	if DEBUG_INTERSECTION_JOINS:
 		var triangle_summary: Array[String] = []
@@ -453,26 +470,57 @@ func _add_intersection_fill_for_node_join(st: SurfaceTool, node_join: Dictionary
 
 
 func _build_intersection_perimeter_from_curves(node_join: Dictionary) -> Array[Vector3]:
-	var approaches: Array[Dictionary] = node_join.get("approaches", [])
-	var corner_curves: Array[Dictionary] = node_join.get("corner_curves", [])
+	var corner_entries: Array[Dictionary] = node_join.get("corner_entries", [])
 	var perimeter_points: Array[Vector3] = []
-	if approaches.is_empty():
+	if corner_entries.is_empty():
 		return perimeter_points
-	_append_perimeter_point(perimeter_points, approaches[0]["left_join"])
-	for index in range(approaches.size()):
-		var current: Dictionary = approaches[index]
-		var next: Dictionary = approaches[(index + 1) % approaches.size()]
-		var curve_points: Array[Vector3] = corner_curves[index]["points"]
-		_append_perimeter_point(perimeter_points, current["right_join"])
+	_append_perimeter_point(perimeter_points, corner_entries[0]["point"])
+	for index in range(corner_entries.size()):
+		var current_corner: Dictionary = corner_entries[index]
+		var next_corner: Dictionary = corner_entries[(index + 1) % corner_entries.size()]
+		if int(current_corner["segment_id"]) == int(next_corner["segment_id"]):
+			_append_perimeter_point(perimeter_points, next_corner["point"])
+			continue
+		var curve_points: Array[Vector3] = _build_local_corner_curve(
+			0.0,
+			current_corner["point"],
+			current_corner["direction"],
+			next_corner["point"],
+			next_corner["direction"]
+		)
 		_append_curve_segment_to_perimeter(perimeter_points, curve_points)
-		_append_perimeter_point(perimeter_points, next["left_join"])
+		_append_perimeter_point(perimeter_points, next_corner["point"])
 	return perimeter_points
 
 
-func _build_local_corner_curve(height_offset: float, current: Dictionary, next: Dictionary) -> Array[Vector3]:
-	var start_point: Vector3 = current["right_join"] - Vector3.UP * height_offset
-	var end_point: Vector3 = next["left_join"] - Vector3.UP * height_offset
-	return _elevate_curve_points(_sample_corner_fillet(start_point, current["direction"], end_point, next["direction"]), height_offset)
+func _build_local_corner_curve(height_offset: float, fillet_start: Vector3, start_direction: Vector3, fillet_end: Vector3, end_direction: Vector3) -> Array[Vector3]:
+	var start_point: Vector3 = fillet_start - Vector3.UP * height_offset
+	var end_point: Vector3 = fillet_end - Vector3.UP * height_offset
+	return _elevate_curve_points(_sample_corner_fillet(start_point, start_direction, end_point, end_direction), height_offset)
+
+
+func _build_sorted_corner_entries(node_position: Vector3, approaches: Array[Dictionary]) -> Array[Dictionary]:
+	var corner_entries: Array[Dictionary] = []
+	for index in range(approaches.size()):
+		var current_approach: Dictionary = approaches[index]
+		var next_approach: Dictionary = approaches[(index + 1) % approaches.size()]
+		var right_point: Vector3 = current_approach["right_join"]
+		var left_point: Vector3 = next_approach["left_join"]
+		corner_entries.append({
+			"segment_id": int(current_approach["segment_id"]),
+			"side": "right",
+			"point": right_point,
+			"direction": current_approach["direction"],
+			"angle": atan2(right_point.z - node_position.z, right_point.x - node_position.x),
+		})
+		corner_entries.append({
+			"segment_id": int(next_approach["segment_id"]),
+			"side": "left",
+			"point": left_point,
+			"direction": next_approach["direction"],
+			"angle": atan2(left_point.z - node_position.z, left_point.x - node_position.x),
+		})
+	return corner_entries
 
 
 func _append_perimeter_point(perimeter_points: Array[Vector3], point: Vector3) -> void:
@@ -495,6 +543,29 @@ func _dedupe_perimeter_loop(points: Array[Vector3]) -> Array[Vector3]:
 	if result.size() >= 2 and result[0].distance_squared_to(result[result.size() - 1]) <= 0.0001:
 		result.remove_at(result.size() - 1)
 	return result
+
+
+func _remove_nearly_collinear_points(points: Array[Vector3]) -> Array[Vector3]:
+	if points.size() < 4:
+		return points
+	var filtered_points: Array[Vector3] = []
+	for index in range(points.size()):
+		var previous: Vector3 = points[(index - 1 + points.size()) % points.size()]
+		var current: Vector3 = points[index]
+		var next: Vector3 = points[(index + 1) % points.size()]
+		var previous_dir: Vector2 = Vector2(current.x - previous.x, current.z - previous.z)
+		var next_dir: Vector2 = Vector2(next.x - current.x, next.z - current.z)
+		if previous_dir.length_squared() <= JOIN_EPSILON or next_dir.length_squared() <= JOIN_EPSILON:
+			continue
+		previous_dir = previous_dir.normalized()
+		next_dir = next_dir.normalized()
+		var cross_amount: float = absf(previous_dir.x * next_dir.y - previous_dir.y * next_dir.x)
+		if cross_amount <= 0.01 and current.distance_to(previous) + current.distance_to(next) >= previous.distance_to(next) - 0.01:
+			continue
+		filtered_points.append(current)
+	if filtered_points.size() >= 3:
+		return filtered_points
+	return points
 
 
 func _ensure_counter_clockwise(points: Array[Vector3]) -> Array[Vector3]:
@@ -523,12 +594,12 @@ func _sample_corner_fillet(start_point: Vector3, start_direction: Vector3, end_p
 	var turn_amount: float = absf(_signed_turn_2d(start_tangent, end_tangent))
 	if turn_amount < deg_to_rad(2.0):
 		return [start_point, end_point]
+	if turn_amount > deg_to_rad(135.0):
+		return [start_point, end_point]
 	var turn_blend: float = inverse_lerp(deg_to_rad(2.0), PI, turn_amount)
 	var handle_factor: float = lerpf(FILLET_MIN_HANDLE_FACTOR, FILLET_MAX_HANDLE_FACTOR, turn_blend)
 	var local_radius: float = min(chord_length * 0.65, 8.0)
 	var handle_length: float = min(chord_length * handle_factor, local_radius)
-	if turn_amount > deg_to_rad(150.0):
-		handle_length = min(handle_length, chord_length * 0.2)
 	if handle_length <= MIN_JOIN_TRIM * 0.25:
 		return [start_point, end_point]
 	var control_a: Vector3 = start_point + start_tangent * handle_length
@@ -540,6 +611,19 @@ func _sample_corner_fillet(start_point: Vector3, start_direction: Vector3, end_p
 		var t: float = float(sample_index) / float(sample_count - 1)
 		result.append(_sample_cubic_bezier(start_point, control_a, control_b, end_point, t))
 	return result
+
+
+func _add_intersection_fill_fan_fallback(st: SurfaceTool, perimeter_points: Array[Vector3]) -> void:
+	if perimeter_points.size() < 3:
+		return
+	var center: Vector3 = Vector3.ZERO
+	for point: Vector3 in perimeter_points:
+		center += point
+	center /= float(perimeter_points.size())
+	for index in range(perimeter_points.size()):
+		var current: Vector3 = perimeter_points[index]
+		var next: Vector3 = perimeter_points[(index + 1) % perimeter_points.size()]
+		add_triangle(st, center, current, next)
 
 
 func _sample_cubic_bezier(a: Vector3, b: Vector3, c: Vector3, d: Vector3, t: float) -> Vector3:
@@ -564,7 +648,20 @@ func _signed_turn_2d(from_direction: Vector3, to_direction: Vector3) -> float:
 	return atan2(from_2d.x * to_2d.y - from_2d.y * to_2d.x, from_2d.dot(to_2d))
 
 
-func _print_node_join_debug(node: RoadNetworkData.RoadNode, approaches: Array[Dictionary], corner_curves: Array[Dictionary]) -> void:
+func _uses_left_to_right_perimeter(approaches: Array[Dictionary]) -> bool:
+	if approaches.is_empty():
+		return true
+	var left_to_right_score := 0.0
+	var right_to_left_score := 0.0
+	for approach: Dictionary in approaches:
+		var left_angle: float = float(approach["left_edge_angle"])
+		var right_angle: float = float(approach["right_edge_angle"])
+		left_to_right_score += wrapf(right_angle - left_angle, 0.0, TAU)
+		right_to_left_score += wrapf(left_angle - right_angle, 0.0, TAU)
+	return left_to_right_score <= right_to_left_score
+
+
+func _print_node_join_debug(node: RoadNetworkData.RoadNode, approaches: Array[Dictionary], corner_entries: Array[Dictionary]) -> void:
 	var approach_summary: Array[String] = []
 	for approach: Dictionary in approaches:
 		var left_join: Vector3 = approach["left_join"]
@@ -595,24 +692,45 @@ func _print_node_join_debug(node: RoadNetworkData.RoadNode, approaches: Array[Di
 			step_back_b.z,
 			str(debug_info.get("intersection_valid", false)),
 		])
-	var curve_summary: Array[String] = []
-	for curve: Dictionary in corner_curves:
-		var curve_points: Array[Vector3] = curve["points"]
-		var start_point: Vector3 = curve_points[0]
-		var end_point: Vector3 = curve_points[curve_points.size() - 1]
-		curve_summary.append("%s->%s (%.2f, %.2f) .. (%.2f, %.2f)" % [
-			int(curve["from_segment_id"]),
-			int(curve["to_segment_id"]),
-			start_point.x,
-			start_point.z,
-			end_point.x,
-			end_point.z,
-		])
+	var corner_summary: Array[String] = []
+	for corner: Dictionary in corner_entries:
+		corner_summary.append(
+			"seg %s %s (%.2f, %.2f) angle %.1f" % [
+				int(corner["segment_id"]),
+				String(corner["side"]),
+				corner["point"].x,
+				corner["point"].z,
+				rad_to_deg(float(corner["angle"])),
+			]
+		)
+	print("Intersection node %s sorted corners: %s" % [node.id, " | ".join(corner_summary)])
+	for index in range(corner_entries.size()):
+		var current_corner: Dictionary = corner_entries[index]
+		var next_corner: Dictionary = corner_entries[(index + 1) % corner_entries.size()]
+		if int(current_corner["segment_id"]) == int(next_corner["segment_id"]):
+			continue
+		var sampled_curve: Array[Vector3] = _sample_corner_fillet(
+			current_corner["point"],
+			current_corner["direction"],
+			next_corner["point"],
+			next_corner["direction"]
+		)
 		var sampled_points: Array[String] = []
-		for curve_point: Vector3 in curve_points:
+		for curve_point: Vector3 in sampled_curve:
 			sampled_points.append("(%.2f, %.2f)" % [curve_point.x, curve_point.z])
-		print("Intersection curve %s->%s samples: %s" % [int(curve["from_segment_id"]), int(curve["to_segment_id"]), " -> ".join(sampled_points)])
-	print("Intersection node %s corner curves: %s" % [node.id, " | ".join(curve_summary)])
+		print(
+			"Corner %s.%s -> %s.%s fillet_start(%.2f, %.2f) fillet_end(%.2f, %.2f) samples: %s" % [
+				int(current_corner["segment_id"]),
+				String(current_corner["side"]),
+				int(next_corner["segment_id"]),
+				String(next_corner["side"]),
+				current_corner["point"].x,
+				current_corner["point"].z,
+				next_corner["point"].x,
+				next_corner["point"].z,
+				" -> ".join(sampled_points),
+			]
+		)
 
 
 func _print_intersection_perimeter_debug(node_id: int, raw_points: Array[Vector3], deduped_points: Array[Vector3]) -> void:
